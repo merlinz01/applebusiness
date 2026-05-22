@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 import aiohttp
 
 from .auth import retrieve_oauth_token
-from .errors import ClientError, ErrorResponse
+from .errors import (
+    ClientError,
+    ErrorResponse,
+    _status_code_to_exception,
+)
 from .schemas import (
     AppleCareCoverageResponse,
     AppResponse,
@@ -95,7 +99,12 @@ class Client:
                     error_response = ErrorResponse.model_validate(error_data)
                 except Exception:
                     pass
-                raise ClientError(response.status, error_response, error_data)
+                cls = _status_code_to_exception.get(response.status, ClientError)
+                raise cls(
+                    response.status,
+                    error_response.errors if error_response else None,
+                    error_data,
+                )
             if response.status == 204:
                 return {}
             return await response.json()
