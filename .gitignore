@@ -1,0 +1,11 @@
+__pycache__
+.venv
+/dist
+*.whl
+*.egg-info
+*.tar.gz
+.zed
+.vscode
+.idea
+.DS_Store
+.*_cache
