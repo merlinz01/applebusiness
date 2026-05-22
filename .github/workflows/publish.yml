@@ -59,7 +59,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # Required for creating GitHub release
+      contents: write # Required for creating GitHub release
 
     steps:
       - name: Checkout code
