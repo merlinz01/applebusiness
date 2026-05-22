@@ -70,7 +70,7 @@ class Client:
             await self._set_cached_token(token)
         return token["access_token"]
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Client:
         import aiohttp
 
         token = await self._get_current_oauth_token()
