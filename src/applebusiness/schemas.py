@@ -153,7 +153,7 @@ class OrgDevicesResponse(BaseModel):
 
     data: list[OrgDevice]
     links: PagedDocumentLinks
-    meta: PagingInformation
+    meta: PagingInformation | None = None
 
 
 class OrgDevice(BaseModel):
@@ -213,7 +213,7 @@ class MdmDevicesResponse(BaseModel):
 
     data: list[MdmDevice]
     links: PagedDocumentLinks
-    meta: PagingInformation
+    meta: PagingInformation | None = None
 
 
 class MdmDevice(BaseModel):
@@ -292,7 +292,7 @@ class MdmServersResponse(BaseModel):
     data: list[MdmServer]
     included: list[OrgDevice] | None = None
     links: PagedDocumentLinks
-    meta: PagingInformation
+    meta: PagingInformation | None = None
 
 
 class OrgDeviceAssignedServerLinkageResponse(BaseModel):
@@ -388,7 +388,7 @@ class BlueprintsResponse(BaseModel):
     data: list[Blueprint]
     # included: list[App | Package | Configuration | OrgDevice | User | UserGroup] | None = None
     links: PagedDocumentLinks
-    meta: PagingInformation
+    meta: PagingInformation | None = None
 
 
 class Blueprint(BaseModel):
@@ -526,7 +526,7 @@ class ConfigurationsResponse(BaseModel):
 
     data: list[Configuration]
     links: PagedDocumentLinks
-    meta: PagingInformation
+    meta: PagingInformation | None = None
 
 
 class Configuration(BaseModel):

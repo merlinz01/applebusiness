@@ -1,5 +1,7 @@
 import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Protocol
 
 import aiohttp
 
@@ -36,6 +38,7 @@ from .schemas import (
     OrgDevicesResponse,
     PackageResponse,
     PackagesResponse,
+    PagingInformation,
     UserGroupResponse,
     UserGroupsResponse,
     UserGroupUsersLinkagesResponse,
@@ -44,6 +47,17 @@ from .schemas import (
 )
 
 __all__ = ["Client"]
+
+
+class _PagedResponse[T](Protocol):
+    """Structural type for any list endpoint response that supports paging.
+
+    Parameterised by the item type in ``data`` so :meth:`Client.paginate`
+    can infer the yielded item type from the method passed in.
+    """
+
+    data: list[T]
+    meta: PagingInformation | None
 
 
 class Client:
@@ -109,9 +123,54 @@ class Client:
                 return {}
             return await response.json()
 
-    async def get_org_devices(self) -> OrgDevicesResponse:
+    @staticmethod
+    def _page_params(
+        limit: int | None,
+        cursor: str | None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        params: dict[str, Any] = dict(extra) if extra else {}
+        if limit is not None:
+            params["limit"] = limit
+        if cursor is not None:
+            params["cursor"] = cursor
+        return params or None
+
+    async def paginate[T](
+        self,
+        method: Callable[..., Awaitable[_PagedResponse[T]]],
+        /,
+        **kwargs: Any,
+    ) -> AsyncIterator[T]:
+        """Yield each item across all pages of a list endpoint.
+
+        Walks ``meta.paging.nextCursor`` until exhausted. ``method`` must be a
+        bound list endpoint that accepts a ``cursor`` keyword argument and
+        returns a response whose ``data`` is a list. Any other arguments
+        (e.g. ``limit``, filters) are forwarded on every page request.
+
+        Example::
+
+            async for device in client.paginate(client.get_org_devices):
+                ...
+        """
+        cursor: str | None = kwargs.pop("cursor", None)
+        while True:
+            response = await method(cursor=cursor, **kwargs)
+            for item in response.data:
+                yield item
+            meta = getattr(response, "meta", None)
+            cursor = meta.paging.nextCursor if meta is not None else None
+            if not cursor:
+                return
+
+    async def get_org_devices(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> OrgDevicesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-org-devices"""
-        data = await self._request("GET", "/v1/orgDevices")
+        data = await self._request(
+            "GET", "/v1/orgDevices", params=self._page_params(limit, cursor)
+        )
         return OrgDevicesResponse.model_validate(data)
 
     async def get_org_device(self, id: str) -> OrgDeviceResponse:
@@ -119,9 +178,13 @@ class Client:
         data = await self._request("GET", f"/v1/orgDevices/{id}")
         return OrgDeviceResponse.model_validate(data)
 
-    async def get_mdm_devices(self) -> MdmDevicesResponse:
+    async def get_mdm_devices(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> MdmDevicesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-apple-mdm-enrolled-devices"""
-        data = await self._request("GET", "/v1/mdmDevices")
+        data = await self._request(
+            "GET", "/v1/mdmDevices", params=self._page_params(limit, cursor)
+        )
         return MdmDevicesResponse.model_validate(data)
 
     async def get_mdm_device_details(self, id: str) -> MdmDeviceDetailResponse:
@@ -129,9 +192,13 @@ class Client:
         data = await self._request("GET", f"/v1/mdmDevices/{id}/details")
         return MdmDeviceDetailResponse.model_validate(data)
 
-    async def get_mdm_servers(self) -> MdmServersResponse:
+    async def get_mdm_servers(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> MdmServersResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-device-management-services"""
-        data = await self._request("GET", "/v1/mdmServers")
+        data = await self._request(
+            "GET", "/v1/mdmServers", params=self._page_params(limit, cursor)
+        )
         return MdmServersResponse.model_validate(data)
 
     async def get_org_device_assigned_server_id(self, id: str) -> str:
@@ -223,9 +290,13 @@ class Client:
         data = await self._request("GET", f"/v1/orgDeviceActivities/{id}")
         return OrgDeviceActivityResponse.model_validate(data)
 
-    async def get_blueprints(self) -> BlueprintsResponse:
+    async def get_blueprints(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> BlueprintsResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-blueprints"""
-        data = await self._request("GET", "/v1/blueprints")
+        data = await self._request(
+            "GET", "/v1/blueprints", params=self._page_params(limit, cursor)
+        )
         return BlueprintsResponse.model_validate(data)
 
     async def create_blueprint(
@@ -359,9 +430,13 @@ class Client:
         """https://developer.apple.com/documentation/applebusinessapi/delete-a-blueprint"""
         await self._request("DELETE", f"/v1/blueprints/{id}")
 
-    async def get_configurations(self) -> ConfigurationsResponse:
+    async def get_configurations(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> ConfigurationsResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-configurations"""
-        data = await self._request("GET", "/v1/configurations")
+        data = await self._request(
+            "GET", "/v1/configurations", params=self._page_params(limit, cursor)
+        )
         return ConfigurationsResponse.model_validate(data)
 
     async def create_configuration(
@@ -435,29 +510,34 @@ class Client:
         await self._request("DELETE", f"/v1/configurations/{id}")
 
     async def get_org_device_apple_care_coverage(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> AppleCareCoverageResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-applecare-coverage-for-an-orgdevice"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/orgDevices/{id}/appleCareCoverage", params=params
+            "GET",
+            f"/v1/orgDevices/{id}/appleCareCoverage",
+            params=self._page_params(limit, cursor),
         )
         return AppleCareCoverageResponse.model_validate(data)
 
     async def get_mdm_server_device_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> MdmServerDevicesLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-device-ids-for-a-device-management-service"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/mdmServers/{id}/relationships/devices", params=params
+            "GET",
+            f"/v1/mdmServers/{id}/relationships/devices",
+            params=self._page_params(limit, cursor),
         )
         return MdmServerDevicesLinkagesResponse.model_validate(data)
 
-    async def get_users(self, limit: int | None = None) -> UsersResponse:
+    async def get_users(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> UsersResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-users"""
-        params = {"limit": limit} if limit is not None else None
-        data = await self._request("GET", "/v1/users", params=params)
+        data = await self._request(
+            "GET", "/v1/users", params=self._page_params(limit, cursor)
+        )
         return UsersResponse.model_validate(data)
 
     async def get_user(self, id: str) -> UserResponse:
@@ -465,10 +545,13 @@ class Client:
         data = await self._request("GET", f"/v1/users/{id}")
         return UserResponse.model_validate(data)
 
-    async def get_user_groups(self, limit: int | None = None) -> UserGroupsResponse:
+    async def get_user_groups(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> UserGroupsResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-user-groups"""
-        params = {"limit": limit} if limit is not None else None
-        data = await self._request("GET", "/v1/userGroups", params=params)
+        data = await self._request(
+            "GET", "/v1/userGroups", params=self._page_params(limit, cursor)
+        )
         return UserGroupsResponse.model_validate(data)
 
     async def get_user_group(self, id: str) -> UserGroupResponse:
@@ -477,19 +560,23 @@ class Client:
         return UserGroupResponse.model_validate(data)
 
     async def get_user_group_user_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> UserGroupUsersLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-user-ids-for-a-user-group"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/userGroups/{id}/relationships/users", params=params
+            "GET",
+            f"/v1/userGroups/{id}/relationships/users",
+            params=self._page_params(limit, cursor),
         )
         return UserGroupUsersLinkagesResponse.model_validate(data)
 
-    async def get_apps(self, limit: int | None = None) -> AppsResponse:
+    async def get_apps(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> AppsResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-apps"""
-        params = {"limit": limit} if limit is not None else None
-        data = await self._request("GET", "/v1/apps", params=params)
+        data = await self._request(
+            "GET", "/v1/apps", params=self._page_params(limit, cursor)
+        )
         return AppsResponse.model_validate(data)
 
     async def get_app(self, id: str) -> AppResponse:
@@ -497,10 +584,13 @@ class Client:
         data = await self._request("GET", f"/v1/apps/{id}")
         return AppResponse.model_validate(data)
 
-    async def get_packages(self, limit: int | None = None) -> PackagesResponse:
+    async def get_packages(
+        self, limit: int | None = None, cursor: str | None = None
+    ) -> PackagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-packages"""
-        params = {"limit": limit} if limit is not None else None
-        data = await self._request("GET", "/v1/packages", params=params)
+        data = await self._request(
+            "GET", "/v1/packages", params=self._page_params(limit, cursor)
+        )
         return PackagesResponse.model_validate(data)
 
     async def get_package(self, id: str) -> PackageResponse:
@@ -527,12 +617,13 @@ class Client:
         )
 
     async def get_blueprint_app_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> BlueprintAppsLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-app-ids-for-a-blueprint"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/blueprints/{id}/relationships/apps", params=params
+            "GET",
+            f"/v1/blueprints/{id}/relationships/apps",
+            params=self._page_params(limit, cursor),
         )
         return BlueprintAppsLinkagesResponse.model_validate(data)
 
@@ -549,14 +640,13 @@ class Client:
         )
 
     async def get_blueprint_configuration_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> BlueprintConfigurationsLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-configuration-ids-for-a-blueprint"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
             "GET",
             f"/v1/blueprints/{id}/relationships/configurations",
-            params=params,
+            params=self._page_params(limit, cursor),
         )
         return BlueprintConfigurationsLinkagesResponse.model_validate(data)
 
@@ -583,12 +673,13 @@ class Client:
         )
 
     async def get_blueprint_package_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> BlueprintPackagesLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-package-ids-for-a-blueprint"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/blueprints/{id}/relationships/packages", params=params
+            "GET",
+            f"/v1/blueprints/{id}/relationships/packages",
+            params=self._page_params(limit, cursor),
         )
         return BlueprintPackagesLinkagesResponse.model_validate(data)
 
@@ -613,12 +704,13 @@ class Client:
         )
 
     async def get_blueprint_org_device_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> BlueprintOrgDevicesLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-orgdevice-ids-for-a-blueprint"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/blueprints/{id}/relationships/orgDevices", params=params
+            "GET",
+            f"/v1/blueprints/{id}/relationships/orgDevices",
+            params=self._page_params(limit, cursor),
         )
         return BlueprintOrgDevicesLinkagesResponse.model_validate(data)
 
@@ -645,12 +737,13 @@ class Client:
         )
 
     async def get_blueprint_user_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> BlueprintUsersLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-user-ids-for-a-blueprint"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/blueprints/{id}/relationships/users", params=params
+            "GET",
+            f"/v1/blueprints/{id}/relationships/users",
+            params=self._page_params(limit, cursor),
         )
         return BlueprintUsersLinkagesResponse.model_validate(data)
 
@@ -667,12 +760,13 @@ class Client:
         )
 
     async def get_blueprint_user_group_ids(
-        self, id: str, limit: int | None = None
+        self, id: str, limit: int | None = None, cursor: str | None = None
     ) -> BlueprintUserGroupsLinkagesResponse:
         """https://developer.apple.com/documentation/applebusinessapi/get-all-user-group-ids-for-a-blueprint"""
-        params = {"limit": limit} if limit is not None else None
         data = await self._request(
-            "GET", f"/v1/blueprints/{id}/relationships/userGroups", params=params
+            "GET",
+            f"/v1/blueprints/{id}/relationships/userGroups",
+            params=self._page_params(limit, cursor),
         )
         return BlueprintUserGroupsLinkagesResponse.model_validate(data)
 
@@ -719,9 +813,32 @@ class Client:
             params["filter[subjectId]"] = ",".join(subject_ids)
         if types:
             params["filter[type]"] = ",".join(types)
-        if limit is not None:
-            params["limit"] = limit
-        if cursor is not None:
-            params["cursor"] = cursor
+        params = self._page_params(limit, cursor, params) or {}
         data = await self._request("GET", "/v1/auditEvents", params=params)
         return AuditEventsResponse.model_validate(data)
+
+
+# Typing compatibility verification.
+# This should not produce any type checking errors if the client is correctly typed.
+if TYPE_CHECKING:
+
+    async def _verify_client_typing():
+        client = Client("", "", "")
+        async for orgdevice in client.paginate(client.get_org_devices):
+            print(orgdevice)
+        async for device in client.paginate(client.get_mdm_devices):
+            print(device)
+        async for server in client.paginate(client.get_mdm_servers):
+            print(server)
+        async for blueprint in client.paginate(client.get_blueprints):
+            print(blueprint)
+        async for config in client.paginate(client.get_configurations):
+            print(config)
+        async for user in client.paginate(client.get_users):
+            print(user)
+        async for group in client.paginate(client.get_user_groups):
+            print(group)
+        async for app in client.paginate(client.get_apps):
+            print(app)
+        async for package in client.paginate(client.get_packages):
+            print(package)

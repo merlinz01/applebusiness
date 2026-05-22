@@ -77,6 +77,36 @@ The client implements every Apple Business API endpoint documented as of this re
 All responses are returned as typed Pydantic models
 (importable from the top-level `applebusiness` package).
 
+## Pagination
+
+List endpoints accept `limit` and `cursor` for manual paging. Each response
+exposes `meta.paging.nextCursor` — pass it back as `cursor` to fetch the next
+page:
+
+```python
+page = await client.get_org_devices(limit=100)
+while page.meta.paging.nextCursor:
+    page = await client.get_org_devices(
+        limit=100, cursor=page.meta.paging.nextCursor
+    )
+```
+
+To iterate every item across all pages, pass the bound list method to
+`Client.paginate`. Extra keyword arguments (e.g. `limit`, filters) are
+forwarded on every request:
+
+```python
+async for device in client.paginate(client.get_org_devices, limit=200):
+    print(device.id)
+
+async for event in client.paginate(
+    client.get_audit_events,
+    start_timestamp="2026-01-01T00:00:00Z",
+    end_timestamp="2026-02-01T00:00:00Z",
+):
+    ...
+```
+
 ## Activity polling
 
 `assign_devices_to_server` and `unassign_devices_from_server` poll
