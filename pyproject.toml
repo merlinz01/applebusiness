@@ -1,6 +1,6 @@
 [project]
 name = "applebusiness"
-version = "0.1.2"
+version = "0.2.0"
 description = "Async Python client for the Apple Business API"
 readme = "README.md"
 license = "MIT"
